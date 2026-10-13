@@ -40,6 +40,8 @@ async def setup_interview(req: SetupRequest):
         "current_question_index": 0,
         "conversation_history": [],
         "evaluations": [],
+        "qa_chains": {},        # question_id -> 问答链（含追问）
+        "evaluated_qids": [],   # 已入库评估的题目
         "is_following_up": False,
         "is_complete": False,
         "start_time": time.time(),
@@ -98,6 +100,10 @@ async def end_interview(interview_id: str):
 
     session["is_complete"] = True
     session["end_time"] = time.time()
+
+    # 结算当前进行中的题目（提前结束面试时，最后一道题的问答链还没入库）
+    from graph.interview_graph import finalize_pending_question
+    await finalize_pending_question(session)
 
     # 触发报告生成
     from agents.report_agent import generate_report

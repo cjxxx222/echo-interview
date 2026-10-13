@@ -1,4 +1,11 @@
-"""面试对话 LangGraph — SSE流式输出"""
+"""面试对话图 —— SSE 流式输出。
+
+评估时机设计（修复“深度维度没有观察对象”的问题）：
+- 预备评估（provisional）：候选人回答一道题的第一轮回答时触发，仅用于面试官
+  决定是否追问，**不写入 session["evaluations"]**（避免把半截回答当成最终分）。
+- 定题评估（final）：一道题（含全部追问）结束后，把完整问答链交给评估 Agent，
+  写入 evaluations——深度维度此时才有“被追问时的表现”可看。
+"""
 import json
 import time
 from models.schemas import InterviewPhase, ChatMessage, AnswerEvaluation, Evidence
@@ -6,11 +13,62 @@ from agents.evaluator_agent import evaluate_answer
 from agents.interviewer_agent import get_opening_message, get_interviewer_response
 
 
+def _ensure_session_state(session: dict) -> None:
+    session.setdefault("qa_chains", {})        # question_id -> [{"interviewer","candidate"}]
+    session.setdefault("evaluated_qids", [])   # 已入库评估的题目 id
+
+
+def _last_interviewer_message(session: dict) -> str:
+    for msg in reversed(session["conversation_history"]):
+        if msg["role"] == "interviewer":
+            return msg["content"]
+    return ""
+
+
+def _chain_answer_text(chain: list[dict]) -> str:
+    return "\n".join(t.get("candidate", "") for t in chain if t.get("candidate"))
+
+
+async def finalize_question(session: dict, question) -> None:
+    """定题评估：完整问答链 → 评估 Agent → 入库。幂等（已评估过的题直接跳过）。"""
+    _ensure_session_state(session)
+    qid = question.id
+    if qid in session["evaluated_qids"]:
+        return
+    chain = session["qa_chains"].get(qid) or []
+    if not chain:
+        return
+
+    jd_reqs = session["jd"].requirements_must + session["jd"].responsibilities
+    ev_data = await evaluate_answer(question, chain, jd_reqs)
+    session["evaluations"].append(AnswerEvaluation(
+        question_id=question.id,
+        question=question.content,
+        answer=_chain_answer_text(chain),
+        score=ev_data.get("score", 5),
+        strengths=ev_data.get("strengths", []),
+        follow_up_direction=ev_data.get("follow_up_direction", ""),
+        dimension_scores=ev_data.get("dimension_scores", {}),
+        evidence=[Evidence(**e) for e in ev_data.get("evidence", [])],
+    ))
+    session["evaluated_qids"].append(qid)
+
+
+async def finalize_pending_question(session: dict) -> None:
+    """面试被提前结束时，结算当前进行中的题目（若有未入库的问答链）。"""
+    _ensure_session_state(session)
+    idx = session["current_question_index"]
+    questions = session["questions"]
+    if idx < len(questions):
+        await finalize_question(session, questions[idx])
+
+
 async def run_interview_turn(session: dict, candidate_message: str):
     """
     处理一轮对话，以 SSE 格式 yield 数据块。
     特殊消息 '__START__' 表示面试开始，生成开场白。
     """
+    _ensure_session_state(session)
     questions = session["questions"]
     is_start = candidate_message == "__START__"
 
@@ -48,13 +106,18 @@ async def run_interview_turn(session: dict, candidate_message: str):
         "timestamp": time.time(),
     })
 
-    # 评估当前回答（只在第一轮或不是追问时评估主题目）
-    # 盲评隔离：评估只拿到题目+回答+JD要求，拿不到面试官的任何信息
+    # 问答链缓冲：把本轮（面试官提问 → 候选人回答）挂到当前题目上
     current_q = questions[current_idx] if current_idx < len(questions) else None
+    if current_q:
+        session["qa_chains"].setdefault(current_q.id, []).append({
+            "interviewer": _last_interviewer_message(session),
+            "candidate": candidate_message,
+        })
+
+    # 预备评估：只在每道题的第一轮回答触发，仅用于面试官的追问决策，不写入 evaluations
     evaluation = None
     if current_q and not is_following_up:
         try:
-            from models.schemas import AnswerEvaluation
             jd_reqs = session["jd"].requirements_must + session["jd"].responsibilities
             ev_data = await evaluate_answer(current_q, candidate_message, jd_reqs)
             evaluation = AnswerEvaluation(
@@ -68,12 +131,10 @@ async def run_interview_turn(session: dict, candidate_message: str):
                 dimension_scores=ev_data.get("dimension_scores", {}),
                 evidence=[Evidence(**e) for e in ev_data.get("evidence", [])],
             )
-            session["evaluations"].append(evaluation)
         except Exception as e:
-            print(f"评估异常: {e}")
+            print(f"预备评估异常: {e}")
 
     if evaluation is None:
-        from models.schemas import AnswerEvaluation
         evaluation = AnswerEvaluation(
             question_id=current_q.id if current_q else "unknown",
             question=current_q.content if current_q else "",
@@ -107,6 +168,12 @@ async def run_interview_turn(session: dict, candidate_message: str):
         session["is_following_up"] = True
     elif action in ("next_question", "transition"):
         session["is_following_up"] = False
+        # 定题评估：当前题（含追问）已结束，完整问答链入库
+        if current_q:
+            try:
+                await finalize_question(session, current_q)
+            except Exception as e:
+                print(f"定题评估异常: {e}")
         next_idx = current_idx + 1
         if next_idx < len(questions):
             session["current_question_index"] = next_idx
@@ -118,6 +185,11 @@ async def run_interview_turn(session: dict, candidate_message: str):
     elif action == "end":
         session["is_complete"] = True
         session["end_time"] = time.time()
+        if current_q:
+            try:
+                await finalize_question(session, current_q)
+            except Exception as e:
+                print(f"定题评估异常: {e}")
 
     # 发送状态更新
     status_data = {

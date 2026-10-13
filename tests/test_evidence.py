@@ -101,6 +101,38 @@ class TestValidateEvidence:
         assert valid == []
 
 
+CHAIN = [
+    {"interviewer": "请介绍你的评测集建设项目", "candidate": "我负责评测集建设，整理了 400 多条问答对。"},
+    {"interviewer": "准确率具体是怎么提升的？", "candidate": "每周做一轮 badcase 归类，推动 Prompt 迭代。"},
+]
+
+
+class TestChainEvidence:
+    """问答链模式：quote 可来自任意一轮候选人回答，但不许跨轮拼接、不许引用面试官。"""
+
+    def test_quote_from_followup_turn_accepted(self):
+        valid, invalid = validate_evidence(
+            [{"dimension": "depth", "quote": "每周做一轮 badcase 归类", "reason": "有动作无标准", "points_deducted": 2}],
+            CHAIN,
+        )
+        assert len(valid) == 1 and invalid == []
+
+    def test_cross_turn_splice_rejected(self):
+        """跨两轮回答拼接的引用不算逐字原文。"""
+        valid, invalid = validate_evidence(
+            [{"dimension": "depth", "quote": "整理了 400 多条问答对。每周做一轮", "reason": "拼接", "points_deducted": 1}],
+            CHAIN,
+        )
+        assert valid == []
+
+    def test_interviewer_text_rejected(self):
+        valid, invalid = validate_evidence(
+            [{"dimension": "depth", "quote": "准确率具体是怎么提升的？", "reason": "引用面试官", "points_deducted": 1}],
+            CHAIN,
+        )
+        assert valid == []
+
+
 @pytest.mark.asyncio
 class TestEvaluateAnswer:
     async def test_good_evidence_passes_first_try(self, monkeypatch):
