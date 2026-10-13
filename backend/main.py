@@ -65,6 +65,29 @@ async def privacy_policy():
     }
 
 
+# ========== 同源前端服务（生产部署） ==========
+# Docker 构建时 frontend/dist 由镜像内置；本地开发（未构建）时跳过。
+# 所有 API 路由已注册在前，此处兜底其余路径 → SPA history 模式直接访问/刷新不 404
+_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+if os.path.isdir(_DIST):
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+
+    _INDEX = os.path.join(_DIST, "index.html")
+    if os.path.isdir(os.path.join(_DIST, "assets")):
+        app.mount("/assets", StaticFiles(directory=os.path.join(_DIST, "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "Not found")
+        candidate = os.path.join(_DIST, full_path)
+        if os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(_INDEX)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

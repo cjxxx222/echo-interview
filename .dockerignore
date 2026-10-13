@@ -1,0 +1,11 @@
+.git
+frontend/node_modules
+frontend/dist
+backend/__pycache__
+backend/**/__pycache__
+backend/uploads
+backend/vectorstore
+backend/.env
+.pytest_cache
+tests
+*.md

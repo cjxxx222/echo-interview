@@ -75,9 +75,38 @@ curl localhost:8000/api/calibration/stats                            # 一致性
 
 ## 部署
 
-- 后端：Railway / Render / 任意 VPS（`uvicorn main:app`），设环境变量 `DEEPSEEK_API_KEY` 和 `FRONTEND_ORIGIN`
-- 前端：`npm run build` 后部署 Vercel/Netlify，API 地址配反向代理或改 `vite.config.ts` 的代理目标
-- 成本：一场完整面试（10 轮问答 + 评估 + 报告）约 0.5~1 元（DeepSeek 计价）
+**架构决策：前后端打进同一个 Docker 镜像，由 FastAPI 同源服务。** 不上 Vercel/serverless，两条硬约束：① SSE 流式面试对话在 serverless 有执行时限与流式缓冲问题；② 会话状态在内存（隐私设计：不落盘），serverless 多实例会丢会话。同源部署同时做到零跨域配置、迁移零改动。
+
+### 方案 A：Railway（0 成本起步，推荐）
+
+1. 仓库推到 GitHub（`git remote add origin … && git push -u origin main`）
+2. Railway → New Project → Deploy from GitHub repo → 自动识别 Dockerfile
+3. 环境变量只配三个：
+
+| 变量 | 值 |
+|---|---|
+| `DEEPSEEK_API_KEY` | 你的 DeepSeek key |
+| `LLM_PROVIDER` | `deepseek` |
+| `PORT` | `8000`（Railway 会自动注入，通常不用手动加） |
+
+完成后 Railway 给一个域名，全部功能同源可用。
+
+### 方案 B：任意 VPS（国内访问慢时迁这，约 ¥30-60/月）
+
+```bash
+docker build -t echo-interview .
+docker run -d -p 80:8000 -e DEEPSEEK_API_KEY=sk-xxx echo-interview
+```
+
+推荐阿里云国际版/腾讯云**香港地域**轻量服务器：免 ICP 备案，国内访问快。镜像不变，只换运行环境——所谓的“迁移”就是这一条命令。
+
+### 本地开发
+
+本地前后端分离跑更高效：后端 `uvicorn main:app --port 8000`，前端 `npm run dev`（Vite 已配 `/api` 代理到 8000）。Docker 单容器只在部署时需要。
+
+### 成本
+
+一场完整面试（10 轮问答 + 评估 + 报告，双阶段评估约 12 次 LLM 调用）约 1~2 元（DeepSeek 计价）。Railway 免费额度跑 50 个种子用户足够；超出后约 $5/月。
 
 ## 目录
 
