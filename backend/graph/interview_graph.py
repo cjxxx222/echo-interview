@@ -74,24 +74,34 @@ async def run_interview_turn(session: dict, candidate_message: str):
 
     # ---- 开场白 ----
     if is_start:
-        try:
-            opening_text = await get_opening_message(session)
-        except Exception:
-            opening_text = f"你好！欢迎参加本次面试。我们先从自我介绍开始，{questions[0].content if questions else '请做简单自我介绍'}。"
+        # 幂等：页面刷新会再次发送 __START__。此时重放已有开场白，
+        # 既不重复调用 LLM，也不往对话历史里重复插入（修复"刷新重复开场"）。
+        existing_opening = next(
+            (m["content"] for m in session["conversation_history"] if m["role"] == "interviewer"),
+            "",
+        )
+        if existing_opening:
+            opening_text = existing_opening
+        else:
+            try:
+                opening_text = await get_opening_message(session)
+            except Exception:
+                opening_text = f"你好！欢迎参加本次面试。我们先从自我介绍开始，{questions[0].content if questions else '请做简单自我介绍'}。"
 
         # 流式输出开场白
         for char in opening_text:
             yield f"data: {json.dumps({'type': 'token', 'data': char}, ensure_ascii=False)}\n\n"
 
-        # 记录到会话历史
-        session["conversation_history"].append({
-            "role": "interviewer",
-            "content": opening_text,
-            "timestamp": time.time(),
-        })
+        # 仅首次开场才记录到会话历史
+        if not existing_opening:
+            session["conversation_history"].append({
+                "role": "interviewer",
+                "content": opening_text,
+                "timestamp": time.time(),
+            })
 
-        # 发送状态
-        yield f"data: {json.dumps({'type': 'status', 'data': {'phase': session['current_phase'].value, 'question_index': 0, 'total': len(questions)}})}\n\n"
+        # 发送状态：用会话的真实进度（刷新后能正确显示当前题号）
+        yield f"data: {json.dumps({'type': 'status', 'data': {'phase': session['current_phase'].value, 'question_index': session['current_question_index'], 'total': len(questions), 'is_complete': session['is_complete']}})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return
 

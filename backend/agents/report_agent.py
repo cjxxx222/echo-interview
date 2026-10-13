@@ -106,13 +106,17 @@ async def generate_report(session: dict) -> InterviewReport:
         sorted(DIMENSION_KEYS, key=lambda k: getattr(dims, k))[:2]
     ]
 
-    # ---- 逐题回顾：原文截断 + 该题证据 ----
+    # ---- 逐题回顾：完整原文 + 该题证据 ----
+    # 注意：这里不能截断 user_answer。扣分证据的 quote 是候选人回答的逐字原文，
+    # 一旦截断（历史 bug：answer[:300]），长回答里落在截断点之后的引文就无法在
+    # 报告里被找到核对，直接破坏「每条扣分可对照原文」这一核心承诺。
+    # 展示层由前端折叠卡片处理长度。
     reviews = []
     for ev in evaluations:
         reviews.append(QuestionReview(
             question_id=ev.question_id,
             question=ev.question,
-            user_answer=ev.answer[:300] + ("…" if len(ev.answer) > 300 else ""),
+            user_answer=ev.answer,
             score=ev.score,
             strengths=ev.strengths,
             weaknesses=[f"{DIMENSION_LABELS.get(e.dimension, e.dimension)}：{e.reason}"
@@ -150,7 +154,7 @@ def _minimal_report(session: dict, duration_sec: int) -> InterviewReport:
         QuestionReview(
             question_id=e.question_id,
             question=e.question,
-            user_answer=e.answer[:200],
+            user_answer=e.answer,
             score=e.score,
             strengths=e.strengths,
             weaknesses=[],

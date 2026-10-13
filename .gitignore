@@ -26,3 +26,11 @@ Thumbs.db
 
 # Logs
 *.log
+
+# W1 验收产出（含面试数据，不提交）
+reports/
+scripts/__pycache__/
+
+# UI 走查产物（截图 / playwright 会话）
+shots/
+.playwright-cli/

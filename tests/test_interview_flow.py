@@ -137,3 +137,20 @@ class TestInterviewFlow:
         await finalize_question(session, session["questions"][0])  # 第二次应跳过
         assert len(session["evaluations"]) == 1
         assert session["evaluated_qids"] == ["q1"]
+
+    async def test_start_is_idempotent(self, monkeypatch):
+        """回归：页面刷新会再次发送 __START__，不得重复生成/重复插入开场白。"""
+        fake = RoutingFakeLLM()
+        monkeypatch.setattr("agents.interviewer_agent.get_llm", lambda **kw: fake)
+        session = _make_session()
+
+        await _drain(session, "__START__")
+        first = session["conversation_history"][0]["content"]
+        assert len(session["conversation_history"]) == 1
+
+        # 模拟刷新：再次 __START__
+        await _drain(session, "__START__")
+        assert len(session["conversation_history"]) == 1, "刷新不应重复插入开场白"
+        assert session["conversation_history"][0]["content"] == first
+        # 开场白只应调用一次 LLM
+        assert len([p for p in fake.prompts if "请用友好、专业的语气开场" in p]) == 1

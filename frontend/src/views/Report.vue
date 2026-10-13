@@ -74,6 +74,14 @@
       <button class="btn-secondary" @click="$router.push('/')">返回首页</button>
     </div>
   </div>
+  <div v-else-if="errorMsg" class="error-state">
+    <p class="error-title">报告加载失败</p>
+    <p class="error-detail">{{ errorMsg }}</p>
+    <div class="actions">
+      <button class="btn-primary" @click="loadReport">重试</button>
+      <button class="btn-secondary" @click="$router.push('/')">返回首页</button>
+    </div>
+  </div>
   <div v-else class="loading">加载报告中...</div>
 </template>
 
@@ -85,6 +93,7 @@ import type { InterviewReport } from '../types'
 const route = useRoute()
 const report = ref<InterviewReport | null>(null)
 const expanded = ref(new Set<string>())
+const errorMsg = ref('')
 const privacyText = ref('面试内容仅存于服务内存，不落盘，到期自动清除。')
 
 const dimLabels = {
@@ -109,10 +118,29 @@ function toggleReview(id: string) {
   else expanded.value.add(id)
 }
 
-onMounted(async () => {
+async function loadReport() {
+  errorMsg.value = ''
   const id = route.params.id
-  const res = await fetch(`/api/report/${id}`)
-  if (res.ok) report.value = await res.json()
+  try {
+    const res = await fetch(`/api/report/${id}`)
+    if (res.ok) {
+      report.value = await res.json()
+      return
+    }
+    if (res.status === 404) {
+      errorMsg.value = '找不到这份报告：面试会话可能已被清理（服务重启或超过数据保留期）。'
+    } else if (res.status === 400) {
+      errorMsg.value = '这场面试还没有结束，暂时无法生成报告。'
+    } else {
+      errorMsg.value = `服务返回错误（HTTP ${res.status}），请稍后重试。`
+    }
+  } catch (e) {
+    errorMsg.value = '网络异常，无法连接服务，请确认后端是否在运行。'
+  }
+}
+
+onMounted(async () => {
+  await loadReport()
   try {
     const p = await fetch('/api/privacy')
     if (p.ok) privacyText.value = (await p.json()).statement
@@ -183,4 +211,8 @@ h3 { color: #F9FAFB; margin-bottom: 16px; }
 .privacy { color: #6B7280; font-size: 0.8rem; line-height: 1.6; margin-bottom: 16px; }
 .actions { display: flex; gap: 12px; margin-top: 24px; }
 .loading { text-align: center; color: #9CA3AF; padding: 60px; }
+.error-state { max-width: 560px; margin: 60px auto; text-align: center; background: #1F2937; border: 1px solid #374151; border-radius: 12px; padding: 40px 24px; }
+.error-title { color: #F9FAFB; font-size: 1.2rem; font-weight: 600; margin-bottom: 12px; }
+.error-detail { color: #9CA3AF; line-height: 1.6; }
+.error-state .actions { justify-content: center; }
 </style>

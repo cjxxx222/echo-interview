@@ -12,7 +12,7 @@ QUESTION_GEN_PROMPT = """你是资深技术面试官。请根据以下信息，�
 面试重点方向：{interview_focus}
 候选人项目经历：{project_summary}
 
-请生成10-15道面试题，覆盖5个阶段，只输出JSON，不要有其他文字，不要有markdown代码块标记：
+请生成6-8道面试题，覆盖5个阶段，只输出JSON，不要有其他文字，不要有markdown代码块标记：
 {{
   "questions": [
     {{
@@ -27,12 +27,16 @@ QUESTION_GEN_PROMPT = """你是资深技术面试官。请根据以下信息，�
 }}
 
 要求：
-- opening阶段：1-2道（自我介绍类）
-- technical阶段：3-5道（技术基础，结合岗位要求和候选人技能）
-- project阶段：2-3道（针对候选人简历中的具体项目）
-- scenario阶段：1-2道（场景设计题，贴近目标岗位实际工作）
-- open阶段：1-2道（开放题）
-- 每道题都要有考察意图和参考答案要点"""
+- opening阶段：1道（自我介绍类）
+- technical阶段：2-3道（技术基础，结合岗位要求和候选人技能）
+- project阶段：2道（针对候选人简历中的具体项目）
+- scenario阶段：1道（场景设计题，贴近目标岗位实际工作）
+- open阶段：1道（开放题）
+- 每道题都要有考察意图和参考答案要点
+- 严格控制总题量在 6-8 道：真人面试时长有限，题量过多会导致面试无法完成"""
+
+# 题量硬上限：即使模型超额输出，也只保留前 N 道（含追问，一场面试的总轮次可控）
+MAX_QUESTIONS = 8
 
 
 def extract_json(text: str) -> dict:
@@ -82,7 +86,8 @@ async def generate_questions(
                 except Exception:
                     continue
             if questions:
-                return questions
+                # 硬上限兜底：模型可能无视 6-8 道的要求，这里强制截断
+                return questions[:MAX_QUESTIONS]
         except Exception as e:
             print(f"题目生成失败: {e}")
             continue
