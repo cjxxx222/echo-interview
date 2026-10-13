@@ -1,0 +1,12 @@
+fastapi==0.115.0
+uvicorn==0.30.0
+python-multipart==0.0.9
+python-dotenv==1.0.1
+pydantic==2.9.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+langchain-ollama>=0.2.0
+langgraph>=0.2.0
+pypdf>=4.0.0
+python-docx>=1.0.0
